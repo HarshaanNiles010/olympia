@@ -976,6 +976,7 @@ dependencies = [
  "anyhow",
  "axum",
  "encoding_rs",
+ "futures-util",
  "htmd",
  "libc",
  "pulldown-cmark",

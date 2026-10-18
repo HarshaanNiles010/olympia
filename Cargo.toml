@@ -23,3 +23,4 @@ tower-http = { version = "0.7.1", features = ["trace"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 uuid = { version = "1.27.0", features = ["serde"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }

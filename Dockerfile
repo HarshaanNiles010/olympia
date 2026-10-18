@@ -7,18 +7,21 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release --locked && cp target/release/olympia /olympia
 
 FROM debian:bookworm-slim
-# pandoc converts docx/odt/epub/pptx/xlsx/csv/rst/org/tex; poppler (pdftohtml) reads pdf layout;
+# pandoc converts docx/odt/epub/pptx/xlsx/csv/rst/org/tex; poppler (pdftohtml) reads pdf layout
+# and pdftoppm renders scanned pages; tesseract OCRs images and those pages;
 # LibreOffice (no GUI) upgrades legacy doc/xls/ppt to docx/xlsx/pptx for pandoc.
 # Debian's pandoc is 2.17, which lacks pptx/xlsx/tsv, so take the upstream release instead.
 ARG TARGETARCH
 ARG PANDOC_VERSION=3.9.0.2
 ADD https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-1-${TARGETARCH}.deb /tmp/pandoc.deb
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends /tmp/pandoc.deb poppler-utils ca-certificates \
+    && apt-get install -y --no-install-recommends /tmp/pandoc.deb poppler-utils tesseract-ocr ca-certificates \
        libreoffice-writer-nogui libreoffice-calc-nogui libreoffice-impress-nogui \
     && rm -rf /var/lib/apt/lists/* /tmp/pandoc.deb
 COPY --from=build /olympia /usr/local/bin/olympia
 USER nobody
 ENV BIND_ADDR=0.0.0.0:3000
+# Pages are OCR'd one Tesseract per core; keep each single-threaded so they don't oversubscribe.
+ENV OMP_THREAD_LIMIT=1
 EXPOSE 3000
 CMD ["olympia"]

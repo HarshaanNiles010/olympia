@@ -59,6 +59,7 @@ mod tests {
             (ConvertError::Unsupported("exe".into()).into(), StatusCode::UNSUPPORTED_MEDIA_TYPE),
             (ConvertError::NoExtension.into(), StatusCode::UNSUPPORTED_MEDIA_TYPE),
             (ConvertError::NoText.into(), StatusCode::UNPROCESSABLE_ENTITY),
+            (ConvertError::TooManyPages(100).into(), StatusCode::UNPROCESSABLE_ENTITY),
             (ConvertError::Timeout("pandoc").into(), StatusCode::UNPROCESSABLE_ENTITY),
             (ConvertError::Tool("pandoc", "bad".into()).into(), StatusCode::UNPROCESSABLE_ENTITY),
             (ConvertError::Io(std::io::ErrorKind::NotFound.into()).into(), StatusCode::INTERNAL_SERVER_ERROR),

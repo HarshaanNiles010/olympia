@@ -13,8 +13,10 @@ pub enum ConvertError {
     Unsupported(String),
     #[error("html conversion failed: {0}")]
     Html(std::io::Error),
-    #[error("pdf has no extractable text (scanned images need OCR)")]
+    #[error("no text found in the file, even with OCR")]
     NoText,
+    #[error("scanned pdf has more than {0} pages")]
+    TooManyPages(usize),
     #[error("{0} timed out")]
     Timeout(&'static str),
     #[error("{0} failed: {1}")]
@@ -86,6 +88,10 @@ pub async fn to_markdown(filename: &str, data: &[u8]) -> Result<Converted, Conve
         // Pandoc only reads UTF-8 text.
         "rst" | "org" | "textile" | "csv" | "tsv" => pandoc(&ext, decode_text(data).as_bytes()).await?.into(),
         "tex" | "latex" => pandoc("latex", decode_text(data).as_bytes()).await?.into(),
+        "png" | "jpg" | "jpeg" | "webp" | "bmp" | "tif" | "tiff" => match crate::ocr::image(data).await? {
+            text if text.is_empty() => return Err(ConvertError::NoText),
+            text => text.into(),
+        },
         "" => return Err(ConvertError::NoExtension),
         other => return Err(ConvertError::Unsupported(other.to_string())),
     })
@@ -96,15 +102,17 @@ pub async fn to_markdown(filename: &str, data: &[u8]) -> Result<Converted, Conve
 /// A failure only warns: the matching formats will then fail per request.
 pub async fn warm_up() {
     let started = std::time::Instant::now();
-    let (pandoc, pdftohtml, soffice) = tokio::join!(
+    let (pandoc, pdftohtml, soffice, tesseract) = tokio::join!(
         warm_pandoc(),
         run("pdftohtml", &["-v"], &[]),
         office("txt", "docx", b"warm-up"),
+        run("tesseract", &["--list-langs"], &[]),
     );
     for (tool, err) in [
         ("pandoc", pandoc.err()),
         ("pdftohtml", pdftohtml.err()),
         ("soffice", soffice.err()),
+        ("tesseract", tesseract.err()),
     ] {
         if let Some(err) = err {
             warn!(tool, error = %err, "converter warm-up failed");
@@ -143,7 +151,7 @@ fn decode_text(data: &[u8]) -> String {
 
 /// Plain text as markdown: escapes line starts markdown would read as headings, lists,
 /// quotes, tables or HTML, so every line stays literal text.
-fn escape_plain(text: &str) -> String {
+pub(crate) fn escape_plain(text: &str) -> String {
     text.lines()
         .map(|line| {
             let indent = line.len() - line.trim_start_matches(' ').len();
@@ -191,11 +199,19 @@ async fn pdf(data: &[u8]) -> Result<String, ConvertError> {
     // pdftohtml cannot read stdin, so the upload goes through a temp file.
     let path = temp_path(".pdf");
     tokio::fs::write(&path, data).await?;
-    let file = path.to_string_lossy();
-    let xml = run("pdftohtml", &["-xml", "-i", "-stdout", &file], &[]).await;
+    let result = pdf_file(&path).await;
     let _ = tokio::fs::remove_file(&path).await;
+    result
+}
 
-    let markdown = crate::pdf::layout_to_markdown(&xml?);
+async fn pdf_file(path: &std::path::Path) -> Result<String, ConvertError> {
+    let xml = run("pdftohtml", &["-xml", "-i", "-stdout", &path.to_string_lossy()], &[]).await?;
+    let mut markdown = crate::pdf::layout_to_markdown(&xml);
+    // shortcut: OCR only when no page has a text layer; mixed scans keep just their text pages,
+    // and images inside text PDFs are not read. Upgrade to per-page OCR if those show up.
+    if markdown.is_empty() {
+        markdown = crate::ocr::pdf(path).await?;
+    }
     if markdown.is_empty() {
         return Err(ConvertError::NoText);
     }
@@ -234,7 +250,7 @@ async fn pandoc(format: &str, data: &[u8]) -> Result<String, ConvertError> {
 const TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Runs a converter, feeding `input` on stdin and returning stdout.
-async fn run(program: &'static str, args: &[&str], input: &[u8]) -> Result<String, ConvertError> {
+pub(crate) async fn run(program: &'static str, args: &[&str], input: &[u8]) -> Result<String, ConvertError> {
     run_for(program, args, input, TIMEOUT).await
 }
 

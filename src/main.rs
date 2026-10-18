@@ -1,6 +1,7 @@
 mod chunk;
 mod convert;
 mod error;
+mod ocr;
 mod pdf;
 
 use axum::{
