@@ -135,6 +135,8 @@ fn parse(xml: &str) -> (HashMap<String, f32>, Vec<Line>) {
     let mut sizes = HashMap::new();
     let mut lines: Vec<Line> = Vec::new();
     let mut page = 0;
+    // Right edge of the last fragment, to tell a column gap from glyphs set side by side.
+    let mut right = 0;
     for raw in xml.lines() {
         let row = raw.trim_start();
         if row.starts_with("<page ") {
@@ -145,13 +147,17 @@ fn parse(xml: &str) -> (HashMap<String, f32>, Vec<Line>) {
             }
         } else if row.starts_with("<text ") {
             let num = |k| attr(row, k).and_then(|v| v.parse::<i32>().ok()).unwrap_or(0);
-            let (top, left, height) = (num("top"), num("left"), num("height"));
+            let (top, left, height, width) = (num("top"), num("left"), num("height"), num("width"));
             let font = attr(row, "font").unwrap_or("").to_string();
             let inner = row.split_once('>').map_or("", |(_, rest)| rest);
             let text = decode(&strip_tags(inner.strip_suffix("</text>").unwrap_or(inner)));
             match lines.last_mut() {
                 // ponytail: only merges with the previous fragment; fine for pdftohtml's line order.
                 Some(l) if l.page == page && (top - l.top).abs() <= l.height / 2 => {
+                    // Table cells and side-by-side captions arrive as separate fragments.
+                    if left > right + 1 {
+                        l.text.push(' ');
+                    }
                     l.text.push_str(&text);
                     *l.chars.entry(font).or_default() += text.chars().count();
                     l.left = l.left.min(left);
@@ -165,6 +171,7 @@ fn parse(xml: &str) -> (HashMap<String, f32>, Vec<Line>) {
                     text,
                 }),
             }
+            right = left + width;
         }
     }
     for l in &mut lines {
@@ -268,7 +275,7 @@ mod tests {
 <text top="80" left="50" width="20" height="30" font="3">I</text>
 <text top="150" left="30" width="50" height="10" font="1">It was de-</text>
 <text top="162" left="10" width="50" height="10" font="1">main, she   said</text>
-<text top="161" left="80" width="5" height="11" font="0">.</text>
+<text top="161" left="60" width="5" height="11" font="0">.</text>
 <text top="174" left="10" width="50" height="10" font="1">And left &amp; <b>ran</b>.</text>
 <text top="186" left="30" width="50" height="10" font="1">New para here.</text>
 "#),
@@ -278,6 +285,8 @@ mod tests {
 "#),
             page(3, r#"<text top="150" left="10" width="50" height="10" font="1">across the page.</text>
 <text top="180" left="10" width="50" height="10" font="1">After a gap.</text>
+<text top="192" left="10" width="30" height="10" font="1">Month</text>
+<text top="192" left="60" width="20" height="10" font="1">Jan</text>
 "#),
         ]
         .join("\n");
@@ -285,7 +294,7 @@ mod tests {
         assert_eq!(
             layout_to_markdown(&xml),
             "# Part One\n\n## I\n\nIt was de-main, she said. And left & ran.\n\nNew para here.\n\n\
-             ## II\n\nChapter two text keeps going across the page.\n\nAfter a gap."
+             ## II\n\nChapter two text keeps going across the page.\n\nAfter a gap. Month Jan"
         );
     }
 }
