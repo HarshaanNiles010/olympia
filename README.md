@@ -21,6 +21,13 @@ Every conversion is stored in Postgres, so the same file uploaded again is answe
 | `docx`, `odt`, `epub`, `pptx`, `xlsx`, `rtf`, `ipynb` | pandoc |
 | `doc`, `xls`, `ppt` | LibreOffice upgrades to the OOXML format, then pandoc |
 | `rst`, `org`, `textile`, `csv`, `tsv`, `tex`, `latex` | pandoc |
+| `png`, `jpg`, `jpeg`, `webp`, `bmp`, `tif`, `tiff` | Tesseract OCR |
+
+### OCR (this branch)
+
+Images are read with Tesseract. A PDF with no text layer at all is rendered at 300 dpi
+(`pdftoppm`) and each page is OCR'd, one page per CPU core in parallel; scans over 100 pages get a 422.
+OCR output is plain text (no headings), English only. Images inside PDFs that do have text are not OCR'd.
 
 The format is picked by file extension. Text files that are not UTF-8 are read as Windows-1252.
 Each converter run is killed after 120 s.
@@ -54,7 +61,7 @@ Errors come back as `{"error": "..."}`:
 |---|---|
 | 400 | no file field in the multipart body |
 | 415 | missing or unsupported file extension |
-| 422 | file could not be converted, timed out, or contains no text |
+| 422 | file could not be converted, timed out, contains no text even with OCR, or is a scan over 100 pages |
 | 500 | server fault (details only in the logs) |
 
 Authentication and rate limiting are not handled here; put the service behind a gateway.
@@ -79,11 +86,11 @@ With Docker (Postgres included):
 docker compose up --build
 ```
 
-Locally you need Rust, Postgres, [pandoc](https://pandoc.org) 3.x, poppler (`pdftohtml`) and LibreOffice
-(`soffice`), all on `PATH`:
+Locally you need Rust, Postgres, [pandoc](https://pandoc.org) 3.x, poppler (`pdftohtml`, `pdftoppm`),
+LibreOffice (`soffice`) and Tesseract with English data, all on `PATH`:
 
 ```sh
-brew install pandoc poppler libreoffice   # macOS
+brew install pandoc poppler libreoffice tesseract   # macOS
 cargo run --release
 ```
 
